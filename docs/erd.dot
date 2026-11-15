@@ -1,0 +1,22 @@
+digraph ERD {
+ graph [rankdir=LR, bgcolor="white", pad="0.5", nodesep="0.5", ranksep="1.1", label="AN TAM - RELATIONAL MODEL (TXT storage)", labelloc=t, fontsize=22, fontname="Sans"];
+ node [shape=plain, fontname="Sans"]; edge [color="#28777b", fontname="Sans", fontsize=11];
+employees [label=<<TABLE BORDER="0" CELLBORDER="1" CELLSPACING="0" CELLPADDING="9"><TR><TD BGCOLOR="#14555c"><FONT COLOR="white"><B>employees</B></FONT></TD></TR><TR><TD ALIGN="LEFT" BGCOLOR="#f0f7f7">PK employee_id</TD></TR><TR><TD ALIGN="LEFT" BGCOLOR="#f0f7f7">name, address, gender</TD></TR><TR><TD ALIGN="LEFT" BGCOLOR="#f0f7f7">birth_date, phone</TD></TR><TR><TD ALIGN="LEFT" BGCOLOR="#f0f7f7">hired_date, email, salary</TD></TR></TABLE>>];
+customers [label=<<TABLE BORDER="0" CELLBORDER="1" CELLSPACING="0" CELLPADDING="9"><TR><TD BGCOLOR="#14555c"><FONT COLOR="white"><B>customers</B></FONT></TD></TR><TR><TD ALIGN="LEFT" BGCOLOR="#f0f7f7">PK customer_id</TD></TR><TR><TD ALIGN="LEFT" BGCOLOR="#f0f7f7">name, address, gender</TD></TR><TR><TD ALIGN="LEFT" BGCOLOR="#f0f7f7">birth_date, phone</TD></TR></TABLE>>];
+suppliers [label=<<TABLE BORDER="0" CELLBORDER="1" CELLSPACING="0" CELLPADDING="9"><TR><TD BGCOLOR="#14555c"><FONT COLOR="white"><B>suppliers</B></FONT></TD></TR><TR><TD ALIGN="LEFT" BGCOLOR="#f0f7f7">PK supplier_id</TD></TR><TR><TD ALIGN="LEFT" BGCOLOR="#f0f7f7">name, address, phone</TD></TR></TABLE>>];
+medicines [label=<<TABLE BORDER="0" CELLBORDER="1" CELLSPACING="0" CELLPADDING="9"><TR><TD BGCOLOR="#14555c"><FONT COLOR="white"><B>medicines</B></FONT></TD></TR><TR><TD ALIGN="LEFT" BGCOLOR="#f0f7f7">PK medicine_id</TD></TR><TR><TD ALIGN="LEFT" BGCOLOR="#f0f7f7">name, unit, selling_price</TD></TR><TR><TD ALIGN="LEFT" BGCOLOR="#f0f7f7">prescription_required</TD></TR><TR><TD ALIGN="LEFT" BGCOLOR="#f0f7f7">ingredient_or_use, instructions</TD></TR></TABLE>>];
+lots [label=<<TABLE BORDER="0" CELLBORDER="1" CELLSPACING="0" CELLPADDING="9"><TR><TD BGCOLOR="#14555c"><FONT COLOR="white"><B>lots</B></FONT></TD></TR><TR><TD ALIGN="LEFT" BGCOLOR="#f0f7f7">PK lot_id</TD></TR><TR><TD ALIGN="LEFT" BGCOLOR="#f0f7f7">FK medicine_id</TD></TR><TR><TD ALIGN="LEFT" BGCOLOR="#f0f7f7">expiry_date, opening_stock</TD></TR></TABLE>>];
+purchases [label=<<TABLE BORDER="0" CELLBORDER="1" CELLSPACING="0" CELLPADDING="9"><TR><TD BGCOLOR="#14555c"><FONT COLOR="white"><B>purchases</B></FONT></TD></TR><TR><TD ALIGN="LEFT" BGCOLOR="#f0f7f7">PK purchase_id</TD></TR><TR><TD ALIGN="LEFT" BGCOLOR="#f0f7f7">purchase_date</TD></TR><TR><TD ALIGN="LEFT" BGCOLOR="#f0f7f7">FK supplier_id</TD></TR><TR><TD ALIGN="LEFT" BGCOLOR="#f0f7f7">FK employee_id</TD></TR></TABLE>>];
+purchase_lines [label=<<TABLE BORDER="0" CELLBORDER="1" CELLSPACING="0" CELLPADDING="9"><TR><TD BGCOLOR="#14555c"><FONT COLOR="white"><B>purchase_lines</B></FONT></TD></TR><TR><TD ALIGN="LEFT" BGCOLOR="#f0f7f7">PK line_id</TD></TR><TR><TD ALIGN="LEFT" BGCOLOR="#f0f7f7">FK purchase_id</TD></TR><TR><TD ALIGN="LEFT" BGCOLOR="#f0f7f7">FK lot_id</TD></TR><TR><TD ALIGN="LEFT" BGCOLOR="#f0f7f7">quantity, unit_price</TD></TR><TR><TD ALIGN="LEFT" BGCOLOR="#f0f7f7">UQ purchase_id + lot_id</TD></TR></TABLE>>];
+sales [label=<<TABLE BORDER="0" CELLBORDER="1" CELLSPACING="0" CELLPADDING="9"><TR><TD BGCOLOR="#14555c"><FONT COLOR="white"><B>sales</B></FONT></TD></TR><TR><TD ALIGN="LEFT" BGCOLOR="#f0f7f7">PK sale_id</TD></TR><TR><TD ALIGN="LEFT" BGCOLOR="#f0f7f7">sale_date</TD></TR><TR><TD ALIGN="LEFT" BGCOLOR="#f0f7f7">FK customer_id</TD></TR><TR><TD ALIGN="LEFT" BGCOLOR="#f0f7f7">FK employee_id</TD></TR><TR><TD ALIGN="LEFT" BGCOLOR="#f0f7f7">prescription_ref</TD></TR></TABLE>>];
+sale_lines [label=<<TABLE BORDER="0" CELLBORDER="1" CELLSPACING="0" CELLPADDING="9"><TR><TD BGCOLOR="#14555c"><FONT COLOR="white"><B>sale_lines</B></FONT></TD></TR><TR><TD ALIGN="LEFT" BGCOLOR="#f0f7f7">PK line_id</TD></TR><TR><TD ALIGN="LEFT" BGCOLOR="#f0f7f7">FK sale_id</TD></TR><TR><TD ALIGN="LEFT" BGCOLOR="#f0f7f7">FK lot_id</TD></TR><TR><TD ALIGN="LEFT" BGCOLOR="#f0f7f7">quantity, unit_price</TD></TR><TR><TD ALIGN="LEFT" BGCOLOR="#f0f7f7">UQ sale_id + lot_id</TD></TR></TABLE>>];
+medicines -> lots [label="1 : 0..N"];
+suppliers -> purchases [label="1 : 0..N"];
+employees -> purchases [label="1 : 0..N"];
+purchases -> purchase_lines [label="1 : 0..N"];
+lots -> purchase_lines [label="1 : 0..N"];
+customers -> sales [label="1 : 0..N"];
+employees -> sales [label="1 : 0..N"];
+sales -> sale_lines [label="1 : 0..N"];
+lots -> sale_lines [label="1 : 0..N"];
+}

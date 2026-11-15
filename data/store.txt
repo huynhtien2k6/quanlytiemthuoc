@@ -1,0 +1,16 @@
+PHARMACY_TXT_V1
+employees	TlYwMQ==	Tmd1eeG7hW4gVsSDbiBBbg==	UTEsIFRQSENN	TmFt	MTk5NS0wNS0xMg==	MDkwMTIzNDU2Nw==	MjAyMi0wMS0wMQ==	YW5AZ21haWwuY29t	MTIwMDAwMDAuMA==
+employees	TlYwMg==	VHLhuqduIFRo4buLIELDrG5o	UTMsIFRQSENN	TuG7rw==	MTk5OS0wOC0yMA==	MDkxMjM0NTY3OA==	MjAyMy0wMy0xNQ==	YmluaEBnbWFpbC5jb20=	NzAwMDAwMC4w
+customers	S0gwMQ==	TMOqIEhvw6BuZyBOYW0=	UTcsIFRQSENN	TmFt	MTk4OC0xMC0xMA==	MDk4NzY1NDMyMQ==
+customers	S0gwMg==	UGjhuqFtIE1pbmggQW5o	QsOsbmggVGjhuqFuaA==	TuG7rw==	MjAwMS0wNC0wNQ==	MDkzMzQ0NTU2Ng==
+suppliers	TkNDMDE=	Q8O0bmcgdHkgRMaw4bujYyBBbiBUw6JtICht4bqrdSk=	VFBIQ00=	MDI4MTIzNDU2Nzg=
+medicines	VDAx	QXVnbWVudGluIDYyNW1n	SOG7mXA=	MjIwMDAwLjA=	dHJ1ZQ==	QW1veGljaWxsaW4=	VeG7kW5nIHRoZW8gxJHGoW4gYsOhYyBzxKk=
+medicines	VDAy	UGFuYWRvbCBFeHRyYQ==	SOG7mXA=	MTgwMDAwLjA=	ZmFsc2U=	R2nhuqNtIMSRYXUsIGjhuqEgc+G7kXQ=	VGhlbyBoxrDhu5tuZyBk4bqrbiB0csOqbiBiYW8gYsOs
+lots	TE9fVDAx	VDAx	MjAyNy0xMi0xMg==	NTA=
+lots	TE9fVDAy	VDAy	MjAyOC0wNi0wMQ==	MTAw
+purchases	UE4wMQ==	MjAyNi0xMS0wMQ==	TkNDMDE=	TlYwMQ==
+purchase_lines	Q1ROMDE=	UE4wMQ==	TE9fVDAy	MjA=	MTIwMDAw
+sales	SEQwMQ==	MjAyNi0xMS0wMg==	S0gwMQ==	TlYwMg==	
+sales	SEQwMg==	MjAyNi0xMS0wMw==	S0gwMg==	TlYwMQ==	RFQwMDE=
+sale_lines	Q1RCMDE=	SEQwMQ==	TE9fVDAy	Mg==	MTgwMDAw
+sale_lines	Q1RCMDI=	SEQwMg==	TE9fVDAx	MQ==	MjIwMDAw

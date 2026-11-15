@@ -1,0 +1,6 @@
+build/
+data/store.lock
+data/*.tmp
+*.class
+.idea/
+.vscode/
