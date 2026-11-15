@@ -1,7 +1,9 @@
 package vn.pharmacy.dao;
 
 import java.io.*;
+import java.nio.ByteBuffer;
 import java.nio.channels.*;
+import java.nio.charset.CodingErrorAction;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.*;
 import java.util.*;
@@ -22,9 +24,13 @@ public final class TextDatabase implements AutoCloseable {
     FileLock l;
     try {
       l = channel.tryLock();
-    } catch (OverlappingFileLockException e) {
-      channel.close();
-      throw new IOException("Dữ liệu đang được mở bởi phiên khác", e);
+    } catch (IOException | RuntimeException e) {
+      try {
+        channel.close();
+      } catch (IOException cleanup) {
+        e.addSuppressed(cleanup);
+      }
+      throw new IOException("Không khóa được dữ liệu; có thể đang được mở bởi phiên khác", e);
     }
     if (l == null) {
       channel.close();
@@ -37,7 +43,8 @@ public final class TextDatabase implements AutoCloseable {
     return Files.exists(file);
   }
 
-  public Map<String, List<List<String>>> read() throws IOException {
+  public synchronized Map<String, List<List<String>>> read() throws IOException {
+    ensureOpen();
     var db = Schema.empty();
     if (!exists()) return db;
     var lines = Files.readAllLines(file, StandardCharsets.UTF_8);
@@ -46,10 +53,18 @@ public final class TextDatabase implements AutoCloseable {
     try {
       for (String line : lines.subList(1, lines.size())) {
         String[] a = line.split("\\t", -1);
-        Schema.table(a[0]);
+        var table = Schema.table(a[0]);
+        if (a.length != table.columns().length + 1)
+          throw new IOException("Sai số cột TXT tại bảng " + a[0]);
         var row = new ArrayList<String>();
         for (int i = 1; i < a.length; i++)
-          row.add(new String(Base64.getDecoder().decode(a[i]), StandardCharsets.UTF_8));
+          row.add(
+              StandardCharsets.UTF_8
+                  .newDecoder()
+                  .onMalformedInput(CodingErrorAction.REPORT)
+                  .onUnmappableCharacter(CodingErrorAction.REPORT)
+                  .decode(ByteBuffer.wrap(Base64.getDecoder().decode(a[i])))
+                  .toString());
         db.get(a[0]).add(row);
       }
     } catch (RuntimeException e) {
@@ -58,7 +73,18 @@ public final class TextDatabase implements AutoCloseable {
     return db;
   }
 
-  public void write(Map<String, List<List<String>>> db) throws IOException {
+  public synchronized void write(Map<String, List<List<String>>> db) throws IOException {
+    ensureOpen();
+    if (db == null || !db.keySet().equals(Schema.empty().keySet()))
+      throw new IOException("Thiếu/thừa bảng TXT");
+    for (var table : Schema.TABLES) {
+      if (db.get(table.key()) == null) throw new IOException("Bảng TXT bị rỗng cấu trúc");
+      for (var row : db.get(table.key()))
+        if (row == null
+            || row.size() != table.columns().length
+            || row.stream().anyMatch(Objects::isNull))
+          throw new IOException("Sai cấu trúc dòng TXT: " + table.key());
+    }
     var s = new StringBuilder("PHARMACY_TXT_V1\n");
     for (var t : Schema.TABLES)
       for (var r : db.get(t.key())) {
@@ -80,8 +106,16 @@ public final class TextDatabase implements AutoCloseable {
     }
   }
 
-  public void close() throws IOException {
-    lock.release();
-    channel.close();
+  private void ensureOpen() throws IOException {
+    if (!channel.isOpen() || !lock.isValid()) throw new IOException("Kho dữ liệu đã đóng");
+  }
+
+  public synchronized void close() throws IOException {
+    if (!channel.isOpen()) return;
+    try {
+      if (lock.isValid()) lock.release();
+    } finally {
+      channel.close();
+    }
   }
 }

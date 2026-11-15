@@ -17,6 +17,7 @@ public final class MainFrame extends JFrame {
   private final JTabbedPane tabs = new JTabbedPane();
   private final List<Runnable> refreshers = new ArrayList<>();
   private final JLabel status = new JLabel();
+  private javax.swing.Timer clockTimer;
 
   public MainFrame(PharmacyService service) {
     super("AN TÂM • Quản lý cửa hàng thuốc");
@@ -35,17 +36,19 @@ public final class MainFrame extends JFrame {
     var clock = new JLabel();
     clock.setForeground(Color.WHITE);
     header.add(clock, BorderLayout.EAST);
-    var timer =
+    clockTimer =
         new javax.swing.Timer(
             1000,
             e ->
                 clock.setText(
                     java.time.format.DateTimeFormatter.ofPattern("dd/MM/yyyy  HH:mm:ss")
                         .format(LocalDateTime.now())));
-    timer.start();
+    clockTimer.start();
     add(header, BorderLayout.NORTH);
     for (var t : Schema.TABLES) tabs.addTab(t.title(), tablePanel(t));
-    tabs.addTab("Thống kê", stats());
+    var stats = new StatsPanel(service);
+    refreshers.add(stats::reload);
+    tabs.addTab("Thống kê", stats);
     tabs.addTab("Hướng dẫn", help());
     add(tabs, BorderLayout.CENTER);
     status.setBorder(BorderFactory.createEmptyBorder(8, 16, 8, 16));
@@ -83,7 +86,7 @@ public final class MainFrame extends JFrame {
     var search = new JTextField(22);
     Runnable load =
         () -> {
-          table.setModel(model(spec.columns(), service.rows(spec.key(), search.getText())));
+          TableSupport.load(table, spec.columns(), service.rows(spec.key(), search.getText()));
           for (int i = 0; i < table.getColumnCount(); i++)
             table.getColumnModel().getColumn(i).setPreferredWidth(i == 1 ? 190 : 150);
         };
@@ -138,29 +141,27 @@ public final class MainFrame extends JFrame {
     if (spec.key().equals("sales"))
       button(
           tools,
-          "In hóa đơn",
+          "Xem / In hóa đơn",
           () -> {
             var row = selected(table);
-            if (row != null) {
-              var invoice =
-                  new JTable(
-                      model(
-                          new String[] {
-                            "Nội dung / Thuốc",
-                            "Số lượng / Giá trị",
-                            "Đơn giá / Nội dung",
-                            "Thành tiền / Giá trị"
-                          },
-                          service.invoice(row.get(0))));
-              print(invoice, "HÓA ĐƠN NHÀ THUỐC AN TÂM • " + row.get(0));
-            }
+            if (row != null)
+              run(() -> new InvoicePrinter(service.invoiceReport(row.get(0))).preview(this));
           });
+    table.addMouseListener(
+        new MouseAdapter() {
+          @Override
+          public void mouseClicked(MouseEvent event) {
+            if (event.getClickCount() == 2 && table.rowAtPoint(event.getPoint()) >= 0) {
+              var row = selected(table);
+              if (row != null) edit(spec, row);
+            }
+          }
+        });
     panel.add(tools, BorderLayout.NORTH);
     panel.add(new JScrollPane(table), BorderLayout.CENTER);
     var hint =
         new JLabel(
-            "Ngày: yyyy-MM-dd • Tiền: VND, dấu chấm thập phân • Mã liên kết phải tồn tại • Kê đơn:"
-                + " true/false");
+            "Nhấp đúp để sửa • Chọn mã từ danh sách trong form • Ngày: yyyy-MM-dd • Đơn giá: VND");
     panel.add(hint, BorderLayout.SOUTH);
     return panel;
   }
@@ -183,13 +184,17 @@ public final class MainFrame extends JFrame {
         new JTextField(
             "HD_"
                 + java.time.format.DateTimeFormatter.ofPattern("yyyyMMddHHmmss")
-                    .format(LocalDateTime.now()));
+                    .format(LocalDateTime.now())
+                + "_"
+                + UUID.randomUUID().toString().substring(0, 6));
     var customer =
         new JComboBox<>(
             customers.stream().map(r -> r.get(0) + " — " + r.get(1)).toArray(String[]::new));
     var employee =
         new JComboBox<>(
             employees.stream().map(r -> r.get(0) + " — " + r.get(1)).toArray(String[]::new));
+    customer.setPrototypeDisplayValue("KH000 — Nguyễn Văn Khách Hàng");
+    employee.setPrototypeDisplayValue("NV000 — Nguyễn Văn Nhân Viên");
     var prescription = new JTextField();
     top.add(new JLabel("Mã hóa đơn"));
     top.add(id);
@@ -200,7 +205,8 @@ public final class MainFrame extends JFrame {
     top.add(new JLabel("Mã đơn bác sĩ (nếu có)"));
     top.add(prescription);
     panel.add(top, BorderLayout.NORTH);
-    var cartModel = model(new String[] {"Mã lô", "Số lượng", "Đơn giá"}, List.of());
+    var cartModel =
+        model(new String[] {"Mã lô", "Tên thuốc", "Số lượng", "Đơn giá", "Thành tiền"}, List.of());
     var cart = new JTable(cartModel);
     cart.setRowHeight(28);
     var center = new JPanel(new BorderLayout());
@@ -218,11 +224,17 @@ public final class MainFrame extends JFrame {
             lots.stream()
                 .map(l -> l.get(0) + " | " + l.get(1) + " | HSD " + l.get(2) + " | Tồn " + l.get(3))
                 .toArray(String[]::new));
+    lotBox.setPreferredSize(new Dimension(650, 32));
+    picker.add(new JLabel("Lô thuốc"));
     picker.add(lotBox);
+    var quantities = new JPanel(new FlowLayout(FlowLayout.LEFT));
+    quantities.add(new JLabel("Số lượng"));
     var qty = new JSpinner(new SpinnerNumberModel(1, 1, 100000000, 1));
-    picker.add(qty);
+    qty.setEditor(new JSpinner.NumberEditor(qty, "0"));
+    quantities.add(qty);
+    quantities.add(new JLabel("Đơn giá (VND)"));
     var price = new JTextField(lots.get(0).get(4), 10);
-    picker.add(price);
+    quantities.add(price);
     lotBox.addActionListener(e -> price.setText(lots.get(lotBox.getSelectedIndex()).get(4)));
     var total = new JLabel("Tổng tiền: 0 VND");
     Runnable updateTotal =
@@ -231,33 +243,54 @@ public final class MainFrame extends JFrame {
           for (int r = 0; r < cartModel.getRowCount(); r++)
             sum =
                 sum.add(
-                    new java.math.BigDecimal(cartModel.getValueAt(r, 1).toString())
-                        .multiply(new java.math.BigDecimal(cartModel.getValueAt(r, 2).toString())));
-          total.setText("Tổng tiền: " + sum.toPlainString() + " VND");
+                    new java.math.BigDecimal(cartModel.getValueAt(r, 2).toString())
+                        .multiply(new java.math.BigDecimal(cartModel.getValueAt(r, 3).toString())));
+          total.setText("Tổng tiền: " + TableSupport.money(sum) + " VND");
         };
     button(
-        picker,
+        quantities,
         "Thêm lô",
         () ->
             run(
                 () -> {
+                  String enteredQty =
+                      ((JSpinner.DefaultEditor) qty.getEditor()).getTextField().getText().trim();
+                  try {
+                    if (!enteredQty.matches("[0-9]+")) throw new NumberFormatException();
+                    int parsed = Integer.parseInt(enteredQty);
+                    if (parsed < 1 || parsed > 100_000_000) throw new NumberFormatException();
+                    qty.setValue(parsed);
+                  } catch (NumberFormatException invalid) {
+                    throw new IllegalArgumentException(
+                        "Số lượng phải là số nguyên từ 1 đến 100.000.000.");
+                  }
                   String lot = lots.get(lotBox.getSelectedIndex()).get(0);
                   String amount = PharmacyService.money(price.getText().trim()).toPlainString();
                   for (int r = 0; r < cartModel.getRowCount(); r++)
                     if (cartModel.getValueAt(r, 0).equals(lot))
                       throw new IllegalArgumentException(
                           "Lô đã có trong giỏ; xóa rồi thêm lại nếu cần sửa");
-                  cartModel.addRow(new Object[] {lot, qty.getValue().toString(), amount});
+                  cartModel.addRow(
+                      new Object[] {
+                        lot,
+                        lots.get(lotBox.getSelectedIndex()).get(1),
+                        qty.getValue().toString(),
+                        amount,
+                        TableSupport.money(
+                            new java.math.BigDecimal(amount)
+                                .multiply(new java.math.BigDecimal(qty.getValue().toString())))
+                      });
                   updateTotal.run();
                 }));
     button(
-        picker,
+        quantities,
         "Bỏ dòng",
         () -> {
           if (cart.getSelectedRow() >= 0) cartModel.removeRow(cart.getSelectedRow());
           updateTotal.run();
         });
     bottom.add(picker);
+    bottom.add(quantities);
     bottom.add(total);
     panel.add(bottom, BorderLayout.SOUTH);
     while (JOptionPane.showConfirmDialog(
@@ -273,8 +306,8 @@ public final class MainFrame extends JFrame {
           items.add(
               List.of(
                   cartModel.getValueAt(r, 0).toString(),
-                  cartModel.getValueAt(r, 1).toString(),
-                  cartModel.getValueAt(r, 2).toString()));
+                  cartModel.getValueAt(r, 2).toString(),
+                  cartModel.getValueAt(r, 3).toString()));
         service.checkout(
             List.of(
                 id.getText().trim(),
@@ -294,26 +327,8 @@ public final class MainFrame extends JFrame {
   }
 
   private void edit(Schema.Table spec, List<String> old) {
-    var form = new JPanel(new GridBagLayout());
-    var fields = new ArrayList<JTextField>();
-    for (int i = 0; i < spec.columns().length; i++) {
-      var c = new GridBagConstraints();
-      c.gridx = 0;
-      c.gridy = i;
-      c.anchor = GridBagConstraints.WEST;
-      c.insets = new Insets(6, 6, 6, 6);
-      form.add(new JLabel(spec.columns()[i]), c);
-      var field = new JTextField(old == null ? "" : old.get(i), 28);
-      if (old == null
-          && (spec.columns()[i].equals("Ngày") || spec.columns()[i].startsWith("Hạn dùng")))
-        field.setText(LocalDate.now().toString());
-      if (old == null && spec.columns()[i].startsWith("Kê đơn")) field.setText("false");
-      if (old != null && i == 0) field.setEditable(false);
-      fields.add(field);
-      c.gridx = 1;
-      c.fill = GridBagConstraints.HORIZONTAL;
-      form.add(field, c);
-    }
+    var form = new RecordEditor(spec, old, service);
+    SwingUtilities.invokeLater(form::focusFirst);
     while (JOptionPane.showConfirmDialog(
             this,
             form,
@@ -322,55 +337,13 @@ public final class MainFrame extends JFrame {
             JOptionPane.PLAIN_MESSAGE)
         == JOptionPane.OK_OPTION) {
       try {
-        service.save(
-            spec.key(),
-            old == null ? null : old.get(0),
-            fields.stream().map(f -> f.getText().trim()).toList());
+        service.save(spec.key(), old == null ? null : old.get(0), form.values());
         refresh();
         break;
       } catch (Exception ex) {
         error(ex);
       }
     }
-  }
-
-  private JPanel stats() {
-    var p = new JPanel(new GridLayout(3, 1, 8, 8));
-    p.setBorder(BorderFactory.createEmptyBorder(12, 16, 12, 16));
-    stat(
-        p,
-        "Doanh thu theo tháng (VND)",
-        new String[] {"Tháng", "Doanh thu"},
-        () -> service.revenue());
-    stat(
-        p,
-        "Thuốc bán chạy",
-        new String[] {"Mã thuốc", "Tên thuốc", "Số lượng"},
-        () -> service.bestSellers());
-    stat(
-        p,
-        "Tồn kho và cảnh báo hạn dùng",
-        new String[] {"Mã lô", "Tên thuốc", "Hạn dùng", "Tồn", "Trạng thái"},
-        () -> service.inventory());
-    return p;
-  }
-
-  private void stat(
-      JPanel parent,
-      String title,
-      String[] columns,
-      java.util.function.Supplier<List<List<String>>> rows) {
-    var box = new JPanel(new BorderLayout());
-    var tools = new JPanel(new FlowLayout(FlowLayout.LEFT));
-    tools.add(new JLabel(title));
-    var table = new JTable();
-    table.setRowHeight(25);
-    table.setAutoCreateRowSorter(true);
-    button(tools, "In báo cáo", () -> print(table, title));
-    box.add(tools, BorderLayout.NORTH);
-    box.add(new JScrollPane(table), BorderLayout.CENTER);
-    parent.add(box);
-    refreshers.add(() -> table.setModel(model(columns, rows.get())));
   }
 
   private JScrollPane help() {
@@ -383,10 +356,12 @@ public final class MainFrame extends JFrame {
                 + "4. Bán hàng: tạo Hóa đơn rồi thêm các dòng Chi tiết bán (mã lô, số lượng, đơn"
                 + " giá).\n"
                 + "   Thuốc kê đơn bắt buộc có mã đơn bác sĩ ở hóa đơn.\n"
-                + "5. Chọn hóa đơn → In hóa đơn. Có thể chọn máy in PDF của hệ điều hành.\n"
-                + "6. Thống kê gồm doanh thu theo tháng, thuốc bán chạy, tồn kho/cảnh báo.\n"
+                + "5. Chọn hóa đơn → Xem / In hóa đơn. Xem trước từng trang, sau đó chọn máy in.\n"
+                + "6. Thống kê có lọc từ/đến ngày, doanh thu tháng, thuốc bán chạy và tồn hiện"
+                + " tại.\n"
                 + "7. Dữ liệu → Xuất Excel tạo file mẫu đủ 9 sheet.\n"
-                + "   Giữ nguyên tên sheet và tiêu đề; ngày nhập dạng văn bản yyyy-MM-dd;\n"
+                + "   Giữ nguyên tên sheet và tiêu đề; ngày có thể là yyyy-MM-dd hoặc ô ngày"
+                + " Excel;\n"
                 + "   điện thoại dạng văn bản để giữ số 0 đầu; không dùng công thức.\n"
                 + "   Nhập Excel thay thế toàn bộ dữ liệu sau khi kiểm tra và xác nhận.\n"
                 + "8. Xóa bản ghi cha chỉ được phép sau khi xóa các bản ghi con liên quan.\n\n"
@@ -433,13 +408,43 @@ public final class MainFrame extends JFrame {
                 this, "Ghi đè file đã có?", "Xuất Excel", JOptionPane.YES_NO_OPTION)
             != 0) return;
     final var target = path;
-    run(
-        () -> {
-          if (input) service.importExcel(target);
-          else service.exportExcel(target);
+    var progress =
+        new JDialog(this, input ? "Đang kiểm tra và nhập Excel" : "Đang xuất Excel", true);
+    progress.setDefaultCloseOperation(WindowConstants.DO_NOTHING_ON_CLOSE);
+    var bar = new JProgressBar();
+    bar.setIndeterminate(true);
+    bar.setBorder(BorderFactory.createEmptyBorder(16, 20, 16, 20));
+    progress.add(bar);
+    progress.setSize(380, 100);
+    progress.setLocationRelativeTo(this);
+    new SwingWorker<Void, Void>() {
+      @Override
+      protected Void doInBackground() throws Exception {
+        if (input) service.importExcel(target);
+        else service.exportExcel(target);
+        return null;
+      }
+
+      @Override
+      protected void done() {
+        progress.dispose();
+        try {
+          get();
           refresh();
-          JOptionPane.showMessageDialog(this, "Hoàn tất: " + target);
-        });
+          JOptionPane.showMessageDialog(MainFrame.this, "Hoàn tất: " + target);
+        } catch (Exception e) {
+          Throwable cause = e.getCause();
+          error(cause instanceof Exception ex ? ex : e);
+        }
+      }
+    }.execute();
+    progress.setVisible(true);
+  }
+
+  @Override
+  public void dispose() {
+    if (clockTimer != null) clockTimer.stop();
+    super.dispose();
   }
 
   private static DefaultTableModel model(String[] columns, List<List<String>> rows) {

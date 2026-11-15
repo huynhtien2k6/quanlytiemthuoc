@@ -4,13 +4,18 @@ jobs:
   test:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-java@v4
+      - uses: actions/checkout@v7
+      - uses: actions/setup-java@v6
         with:
           distribution: temurin
           java-version: '17'
       - run: bash build.sh test
-      - uses: actions/upload-artifact@v4
+      - name: End-to-end Swing flow on virtual display
+        run: xvfb-run -a java -ea -cp build/classes:build/test-classes vn.pharmacy.GuiSmokeTest
+      - uses: actions/upload-artifact@v7
         with:
-          name: pharmacy-jar
-          path: build/pharmacy.jar
+          name: pharmacy-jar-and-preview
+          path: |
+            build/pharmacy.jar
+            docs/giao-dien.png
+            docs/ban-in-mau.png

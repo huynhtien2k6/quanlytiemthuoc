@@ -3,7 +3,16 @@ package vn.pharmacy.dto;
 import java.util.*;
 
 public final class Schema {
-  public record Table(String key, String title, String... columns) {}
+  public record Table(String key, String title, String... columns) {
+    public Table {
+      columns = columns.clone();
+    }
+
+    @Override
+    public String[] columns() {
+      return columns.clone();
+    }
+  }
 
   public static final List<Table> TABLES =
       List.of(
@@ -61,7 +70,10 @@ public final class Schema {
               "Đơn giá"));
 
   public static Table table(String key) {
-    return TABLES.stream().filter(t -> t.key().equals(key)).findFirst().orElseThrow();
+    return TABLES.stream()
+        .filter(t -> t.key().equals(key))
+        .findFirst()
+        .orElseThrow(() -> new IllegalArgumentException("Bảng dữ liệu không tồn tại: " + key));
   }
 
   public static Map<String, List<List<String>>> empty() {

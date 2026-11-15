@@ -5,6 +5,10 @@ import java.math.*;
 import java.time.*;
 import java.util.*;
 import vn.pharmacy.dao.TextDatabase;
+import vn.pharmacy.dto.InvoiceLine;
+import vn.pharmacy.dto.InvoiceReport;
+import vn.pharmacy.dto.LookupOption;
+import vn.pharmacy.dto.SalesSummary;
 import vn.pharmacy.dto.Schema;
 
 public final class PharmacyService {
@@ -22,13 +26,15 @@ public final class PharmacyService {
   }
 
   private static Map<String, List<List<String>>> copy(Map<String, List<List<String>>> src) {
+    checkShape(src);
     var m = Schema.empty();
     src.forEach((k, v) -> v.forEach(r -> m.get(k).add(new ArrayList<>(r))));
     return m;
   }
 
   public synchronized List<List<String>> rows(String key, String query) {
-    String q = query.toLowerCase(Locale.ROOT);
+    Schema.table(key);
+    String q = query == null ? "" : query.toLowerCase(Locale.ROOT);
     return db.get(key).stream()
         .filter(r -> String.join(" ", r).toLowerCase(Locale.ROOT).contains(q))
         .map(r -> (List<String>) new ArrayList<>(r))
@@ -36,6 +42,15 @@ public final class PharmacyService {
   }
 
   public synchronized void save(String key, String oldId, List<String> row) throws IOException {
+    Schema.table(key);
+    if (row == null || row.size() != Schema.table(key).columns().length)
+      throw new IllegalArgumentException("Sai số cột: " + Schema.table(key).title());
+    if (oldId != null && key.equals("lots")) {
+      var oldLot = ref(db, key, oldId);
+      if (!Objects.equals(oldLot.get(1), row.get(1)) && hasMovements(oldId))
+        throw new IllegalArgumentException(
+            "Không đổi thuốc của lô đã có chi tiết nhập/bán; hãy tạo lô mới");
+    }
     var m = copy(db);
     if (oldId != null) {
       if (!oldId.equals(row.get(0)))
@@ -48,8 +63,10 @@ public final class PharmacyService {
   }
 
   public synchronized void delete(String key, String id) throws IOException {
+    Schema.table(key);
     var m = copy(db);
-    m.get(key).removeIf(r -> r.get(0).equals(id));
+    if (!m.get(key).removeIf(r -> r.get(0).equals(id)))
+      throw new IllegalArgumentException("Bản ghi không còn tồn tại: " + id);
     commit(m);
   }
 
@@ -86,7 +103,11 @@ public final class PharmacyService {
 
   private static LocalDate date(String s) {
     try {
-      return LocalDate.parse(s);
+      if (s == null || !s.matches("[0-9]{4}-[0-9]{2}-[0-9]{2}"))
+        throw new IllegalArgumentException();
+      LocalDate value = LocalDate.parse(s);
+      if (value.getYear() < 1) throw new IllegalArgumentException();
+      return value;
     } catch (Exception e) {
       throw new IllegalArgumentException("Ngày phải hợp lệ theo yyyy-MM-dd: " + s);
     }
@@ -109,16 +130,38 @@ public final class PharmacyService {
     return n;
   }
 
-  public static void validate(Map<String, List<List<String>>> m) {
-    if (!m.keySet().equals(Schema.empty().keySet()))
+  /** Reject malformed snapshots before a copy can silently invent a missing empty table. */
+  private static void checkShape(Map<String, List<List<String>>> m) {
+    if (m == null || !m.keySet().equals(Schema.empty().keySet()))
       throw new IllegalArgumentException("Thiếu/thừa bảng dữ liệu");
+    for (var t : Schema.TABLES) {
+      var rows = m.get(t.key());
+      if (rows == null || rows.stream().anyMatch(Objects::isNull))
+        throw new IllegalArgumentException("Bảng hoặc dòng dữ liệu rỗng: " + t.title());
+    }
+  }
+
+  public static void validate(Map<String, List<List<String>>> m) {
+    checkShape(m);
     for (var t : Schema.TABLES) {
       var ids = new HashSet<String>();
       for (var r : m.get(t.key())) {
         if (r.size() != t.columns().length)
           throw new IllegalArgumentException("Sai số cột: " + t.title());
-        if (r.stream().anyMatch(v -> v == null || v.length() > 2000))
-          throw new IllegalArgumentException("Ô dữ liệu quá dài");
+        if (r.stream()
+            .anyMatch(
+                v ->
+                    v == null
+                        || v.length() > 2000
+                        || v.codePoints()
+                            .anyMatch(
+                                c ->
+                                    (c < 32 && c != 9 && c != 10 && c != 13)
+                                        || (c >= 0xd800 && c <= 0xdfff)
+                                        || c == 0xfffe
+                                        || c == 0xffff)))
+          throw new IllegalArgumentException(
+              "Ô dữ liệu không hợp lệ: null, quá 2.000 ký tự hoặc ký tự điều khiển không hỗ trợ");
         if (r.get(0).isBlank() || !r.get(0).matches("[A-Za-z0-9_-]+") || !ids.add(r.get(0)))
           throw new IllegalArgumentException(
               "Mã rỗng, trùng hoặc chứa ký tự không hợp lệ: " + r.get(0));
@@ -127,9 +170,10 @@ public final class PharmacyService {
     for (var r : m.get("employees")) {
       required(r, 1);
       person(r);
-      date(r.get(6));
+      if (date(r.get(6)).isBefore(date(r.get(4))))
+        throw new IllegalArgumentException("Ngày vào làm không được trước ngày sinh");
       money(r.get(8));
-      if (!r.get(7).matches("[^ @]+@[^ @]+\\.[^ @]+"))
+      if (!r.get(7).matches("[^\\s@]+@[^\\s@]+\\.[^\\s@]+"))
         throw new IllegalArgumentException("Email không hợp lệ");
     }
     for (var r : m.get("customers")) {
@@ -153,12 +197,12 @@ public final class PharmacyService {
       qty(r.get(3), true);
     }
     for (var r : m.get("purchases")) {
-      date(r.get(1));
+      documentDate(r.get(1));
       ref(m, "suppliers", r.get(2));
       ref(m, "employees", r.get(3));
     }
     for (var r : m.get("sales")) {
-      date(r.get(1));
+      documentDate(r.get(1));
       ref(m, "customers", r.get(2));
       ref(m, "employees", r.get(3));
     }
@@ -171,9 +215,9 @@ public final class PharmacyService {
         money(r.get(4));
         if (!pairs.add(r.get(1) + "/" + r.get(2)))
           throw new IllegalArgumentException("Một lô chỉ xuất hiện một lần trong mỗi phiếu");
+        if (!date(l.get(2)).isAfter(date(h.get(1))))
+          throw new IllegalArgumentException("Không nhập/bán lô đã hết hạn tại ngày chứng từ");
         if (key.equals("sale_lines")) {
-          if (!date(l.get(2)).isAfter(date(h.get(1))))
-            throw new IllegalArgumentException("Không bán lô đã hết hạn tại ngày hóa đơn");
           if (ref(m, "medicines", l.get(1)).get(4).equals("true") && h.get(4).isBlank())
             throw new IllegalArgumentException("Thuốc kê đơn cần mã đơn bác sĩ");
         }
@@ -231,11 +275,16 @@ public final class PharmacyService {
   /** Header and all lines become visible together, or nothing changes. */
   public synchronized void checkout(List<String> header, List<List<String>> items)
       throws IOException {
-    if (items.isEmpty()) throw new IllegalArgumentException("Giỏ hàng trống");
+    if (header == null
+        || header.size() != Schema.table("sales").columns().length
+        || header.stream().anyMatch(Objects::isNull))
+      throw new IllegalArgumentException("Thông tin hóa đơn sai định dạng");
+    if (items == null || items.isEmpty()) throw new IllegalArgumentException("Giỏ hàng trống");
     var m = copy(db);
     m.get("sales").add(new ArrayList<>(header));
     for (var item : items) {
-      if (item.size() != 3) throw new IllegalArgumentException("Dòng giỏ hàng sai định dạng");
+      if (item == null || item.size() != 3 || item.stream().anyMatch(Objects::isNull))
+        throw new IllegalArgumentException("Dòng giỏ hàng sai định dạng");
       m.get("sale_lines")
           .add(
               new ArrayList<>(
@@ -257,22 +306,89 @@ public final class PharmacyService {
     replace(vn.pharmacy.dao.ExcelFile.read(path));
   }
 
+  private boolean hasMovements(String lotId) {
+    return List.of("purchase_lines", "sale_lines").stream()
+        .flatMap(key -> db.get(key).stream())
+        .anyMatch(r -> r.get(2).equals(lotId));
+  }
+
+  private static LocalDate documentDate(String value) {
+    LocalDate d = date(value);
+    if (d.isAfter(LocalDate.now()))
+      throw new IllegalArgumentException("Ngày chứng từ không được ở tương lai");
+    return d;
+  }
+
+  public synchronized List<LookupOption> lookups(String table) {
+    Schema.table(table);
+    return db.get(table).stream()
+        .map(
+            row -> {
+              String label = row.get(1);
+              if (table.equals("lots")) {
+                label =
+                    ref(db, "medicines", row.get(1)).get(1)
+                        + " | HSD "
+                        + row.get(2)
+                        + " | Tồn "
+                        + stock(db, row.get(0));
+              }
+              return new LookupOption(row.get(0), label);
+            })
+        .toList();
+  }
+
+  /**
+   * Suggested current catalogue price; the committed sale line retains its own historical price.
+   */
+  public synchronized BigDecimal sellingPriceForLot(String lotId) {
+    var lot = ref(db, "lots", lotId);
+    return money(ref(db, "medicines", lot.get(1)).get(3));
+  }
+
+  private static void validateRange(LocalDate from, LocalDate to) {
+    if (from == null || to == null || from.isAfter(to))
+      throw new IllegalArgumentException("Khoảng ngày không hợp lệ: từ ngày phải <= đến ngày");
+  }
+
+  private static boolean within(LocalDate value, LocalDate from, LocalDate to) {
+    return !value.isBefore(from) && !value.isAfter(to);
+  }
+
   public synchronized List<List<String>> revenue() {
-    var map = new TreeMap<String, BigDecimal>();
+    return revenue(LocalDate.of(1, 1, 1), LocalDate.of(9999, 12, 31));
+  }
+
+  /** Inclusive document-date range; amount uses each historical sale-line price. */
+  public synchronized List<List<String>> revenue(LocalDate from, LocalDate to) {
+    validateRange(from, to);
+    var map = new TreeMap<YearMonth, BigDecimal>();
     for (var r : db.get("sale_lines")) {
-      String month = ref(db, "sales", r.get(1)).get(1).substring(0, 7);
-      map.merge(month, money(r.get(4)).multiply(new BigDecimal(r.get(3))), BigDecimal::add);
+      LocalDate soldOn = date(ref(db, "sales", r.get(1)).get(1));
+      if (within(soldOn, from, to))
+        map.merge(
+            YearMonth.from(soldOn),
+            money(r.get(4)).multiply(new BigDecimal(r.get(3))),
+            BigDecimal::add);
     }
     return map.entrySet().stream()
-        .map(e -> List.of(e.getKey(), e.getValue().toPlainString()))
+        .map(e -> List.of(e.getKey().toString(), e.getValue().toPlainString()))
         .toList();
   }
 
   public synchronized List<List<String>> bestSellers() {
+    return bestSellers(LocalDate.of(1, 1, 1), LocalDate.of(9999, 12, 31));
+  }
+
+  public synchronized List<List<String>> bestSellers(LocalDate from, LocalDate to) {
+    validateRange(from, to);
     var sums = new TreeMap<String, Long>();
     for (var r : db.get("sale_lines")) {
-      String med = ref(db, "lots", r.get(2)).get(1);
-      sums.merge(med, Long.parseLong(r.get(3)), Long::sum);
+      LocalDate soldOn = date(ref(db, "sales", r.get(1)).get(1));
+      if (within(soldOn, from, to)) {
+        String med = ref(db, "lots", r.get(2)).get(1);
+        sums.merge(med, Long.parseLong(r.get(3)), Long::sum);
+      }
     }
     return sums.entrySet().stream()
         .sorted(Map.Entry.<String, Long>comparingByValue().reversed())
@@ -281,6 +397,59 @@ public final class PharmacyService {
                 List.of(
                     e.getKey(), ref(db, "medicines", e.getKey()).get(1), e.getValue().toString()))
         .toList();
+  }
+
+  /** Inclusive period totals, excluding draft headers without sale lines. */
+  public synchronized SalesSummary summary(LocalDate from, LocalDate to) {
+    validateRange(from, to);
+    BigDecimal total = BigDecimal.ZERO;
+    long quantity = 0;
+    var completed = new HashSet<String>();
+    for (var row : db.get("sale_lines")) {
+      if (!within(date(ref(db, "sales", row.get(1)).get(1)), from, to)) continue;
+      completed.add(row.get(1));
+      quantity += Long.parseLong(row.get(3));
+      total = total.add(money(row.get(4)).multiply(new BigDecimal(row.get(3))));
+    }
+    return new SalesSummary(total, completed.size(), quantity);
+  }
+
+  /** Typed invoice report: no GUI/print code needs indexes, joins, or monetary calculations. */
+  public synchronized InvoiceReport invoiceReport(String id) {
+    var header = ref(db, "sales", id);
+    var customer = ref(db, "customers", header.get(2));
+    var employee = ref(db, "employees", header.get(3));
+    var lines = new ArrayList<InvoiceLine>();
+    BigDecimal total = BigDecimal.ZERO;
+    for (var row : db.get("sale_lines")) {
+      if (!row.get(1).equals(id)) continue;
+      var lot = ref(db, "lots", row.get(2));
+      var medicine = ref(db, "medicines", lot.get(1));
+      int quantity = qty(row.get(3), false);
+      BigDecimal price = money(row.get(4));
+      BigDecimal amount = price.multiply(BigDecimal.valueOf(quantity));
+      lines.add(
+          new InvoiceLine(
+              medicine.get(0),
+              medicine.get(1),
+              medicine.get(2),
+              lot.get(0),
+              date(lot.get(2)),
+              quantity,
+              price,
+              amount));
+      total = total.add(amount);
+    }
+    return new InvoiceReport(
+        header.get(0),
+        date(header.get(1)),
+        customer.get(1),
+        customer.get(2),
+        customer.get(5),
+        employee.get(1),
+        header.get(4),
+        lines,
+        total);
   }
 
   public synchronized List<List<String>> inventory() {

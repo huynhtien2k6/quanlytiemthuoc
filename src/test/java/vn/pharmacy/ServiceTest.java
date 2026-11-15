@@ -1,10 +1,13 @@
 package vn.pharmacy;
 
 import java.io.*;
+import java.math.BigDecimal;
 import java.nio.file.*;
+import java.time.LocalDate;
 import java.util.*;
 import vn.pharmacy.bus.PharmacyService;
 import vn.pharmacy.dao.*;
+import vn.pharmacy.dto.Schema;
 
 public final class ServiceTest {
   private static int checks;
@@ -126,6 +129,122 @@ public final class ServiceTest {
           () -> s.checkout(List.of("EMPTY", "2026-03-01", "KH1", "NV1", ""), List.of()),
           "empty checkout");
       check(s.availableLots().get(0).get(0).equals("L2"), "FEFO expiry ordering");
+      check(
+          s.sellingPriceForLot("L1").compareTo(new BigDecimal("10000")) == 0,
+          "suggested sale price resolved in BUS");
+      // Date ranges include both endpoints; drafts do not inflate sales KPIs.
+      var jan2 = LocalDate.of(2026, 1, 2);
+      check(
+          s.revenue(jan2, jan2).get(0).equals(List.of("2026-01", "50000")),
+          "inclusive revenue date");
+      check(s.revenue(jan2.plusDays(1), jan2.plusDays(2)).isEmpty(), "empty revenue range");
+      check(
+          s.bestSellers(jan2, jan2).stream().mapToLong(r -> Long.parseLong(r.get(2))).sum() == 4,
+          "period best sellers");
+      add(s, "sales", "DRAFT", "2026-01-02", "KH1", "NV1", "");
+      var summary = s.summary(jan2, jan2);
+      check(
+          summary.invoiceCount() == 1
+              && summary.quantity() == 4
+              && summary.revenue().compareTo(new BigDecimal("50000")) == 0,
+          "period summary excludes draft");
+      rejects(() -> s.revenue(jan2.plusDays(1), jan2), "reversed date range");
+      rejects(() -> s.bestSellers(null, jan2), "missing report range");
+      rejects(() -> s.summary(jan2.plusDays(1), jan2), "invalid KPI range");
+      var report = s.invoiceReport("HD1");
+      check(
+          report.id().equals("HD1")
+              && report.date().equals(jan2)
+              && report.customerPhone().equals("0912345678")
+              && report.lines().size() == 2,
+          "typed report relations");
+      check(
+          report.total().compareTo(new BigDecimal("50000")) == 0
+              && report.lines().get(0).amount().compareTo(new BigDecimal("30000")) == 0,
+          "typed invoice historical prices");
+      try {
+        report.lines().clear();
+        throw new AssertionError("report lines mutable");
+      } catch (UnsupportedOperationException expected) {
+        checks++;
+      }
+      check(
+          s.lookups("lots").get(0).label().contains("Panadol")
+              && s.lookups("lots").get(0).label().contains("Tồn"),
+          "readable lookup labels");
+      var missingTable = s.snapshot();
+      missingTable.remove("suppliers");
+      rejects(() -> s.replace(missingTable), "missing table is not silently invented");
+      var extraTable = s.snapshot();
+      extraTable.put("injected", new ArrayList<>());
+      rejects(() -> s.replace(extraTable), "extra snapshot table");
+      var nullRows = s.snapshot();
+      nullRows.put("suppliers", null);
+      rejects(() -> s.replace(nullRows), "null snapshot rows");
+      rejects(() -> s.save("customers", null, List.of()), "malformed CRUD row");
+      rejects(() -> s.delete("customers", "MISSING"), "delete missing row");
+      rejects(
+          () -> s.checkout(List.of(), List.of(List.of("L1", "1", "10000"))),
+          "malformed cart header");
+      rejects(
+          () -> s.checkout(List.of("BADCART", "2026-01-02", "KH1", "NV1", ""), null), "null cart");
+      rejects(
+          () -> add(s, "sales", "FUTURE", LocalDate.now().plusDays(1).toString(), "KH1", "NV1", ""),
+          "future sale would change current inventory");
+      rejects(
+          () ->
+              add(s, "purchases", "FUTURE", LocalDate.now().plusDays(1).toString(), "NCC1", "NV1"),
+          "future purchase would change current inventory");
+      rejects(() -> add(s, "sales", "EXPANDED", "+02026-01-02", "KH1", "NV1", ""), "expanded year");
+      rejects(
+          () ->
+              s.save(
+                  "employees",
+                  "NV1",
+                  List.of(
+                      "NV1",
+                      "Nguyễn An",
+                      "HCM",
+                      "Nam",
+                      "1995-01-01",
+                      "0901234567",
+                      "1990-01-01",
+                      "an@example.com",
+                      "10000000")),
+          "employment before birth");
+      rejects(
+          () -> s.save("lots", "L1", List.of("L1", "T2", "2099-12-31", "10")),
+          "relabeling already transacted lot");
+      add(s, "lots", "EXPIRED", "T1", "2026-01-01", "0");
+      add(s, "purchases", "PN_EXPIRED", "2026-01-02", "NCC1", "NV1");
+      rejects(
+          () -> add(s, "purchase_lines", "EXPIRED_LINE", "PN_EXPIRED", "EXPIRED", "1", "1"),
+          "receiving expired stock");
+      rejects(
+          () -> add(s, "sale_lines", "EXPIRED_SALE", "HD1", "EXPIRED", "1", "1"),
+          "selling stock expired on invoice date");
+      rejects(
+          () ->
+              s.checkout(
+                  Arrays.asList(null, "2026-01-02", "KH1", "NV1", ""),
+                  List.of(List.of("L1", "1", "1"))),
+          "null cart header cells");
+      rejects(
+          () ->
+              add(
+                  s,
+                  "customers",
+                  "BADXML",
+                  "Tên\u0001không hợp lệ",
+                  "HCM",
+                  "Nam",
+                  "2000-01-01",
+                  "0912345678"),
+          "invalid XML character cannot break Excel export");
+      String originalTitle = Schema.table("sales").columns()[0];
+      Schema.table("sales").columns()[0] = "INJECTED";
+      check(Schema.table("sales").columns()[0].equals(originalTitle), "immutable schema columns");
+
       s.save(
           "customers",
           "KH1",
