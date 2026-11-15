@@ -1,0 +1,3 @@
+data/store.txt whitespace=-blank-at-eol
+*.bat text eol=crlf
+*.sh text eol=lf
